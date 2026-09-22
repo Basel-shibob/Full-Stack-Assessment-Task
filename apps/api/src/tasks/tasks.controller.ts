@@ -70,9 +70,10 @@ export class TasksController {
   @Patch('tasks/:taskId/status')
   updateStatus(
     @Param('taskId') taskId: string,
+    @CurrentUser('id') userId: string,
     @Body() dto: UpdateTaskStatusDto,
   ): Promise<TaskDetail> {
-    return this.tasksService.updateStatus(toObjectId(taskId, 'task id'), dto);
+    return this.tasksService.updateStatus(toObjectId(taskId, 'task id'), toObjectId(userId, 'user id'), dto);
   }
 
   @Delete('tasks/:taskId')
