@@ -56,10 +56,18 @@ export class TasksService {
     userId: Types.ObjectId,
     dto: CreateTaskDto,
   ): Promise<TaskDetail> {
-    const { project } = await this.projectAccessService.assertCanView(projectId, userId);
+    await this.projectAccessService.assertCanView(projectId, userId);
+    const project = await this.projectModel.findOneAndUpdate(
+      { _id: projectId },
+      { $inc: { lastTaskNumber: 1 } },
+      { new: true },
+    );
 
-    const taskCount = await this.taskModel.countDocuments({ projectId });
-    const number = taskCount + 1;
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const number = project.lastTaskNumber;
 
     const task = await this.taskModel.create({
       projectId,
