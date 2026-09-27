@@ -216,6 +216,14 @@ async function seed(): Promise<void> {
   }));
 
   const tasks = await Task.insertMany([...engineeringTasks, ...portalTasks]);
+  await Project.updateOne(
+    { _id: internalPlatform._id },
+    { $set: { lastTaskNumber: engineeringTasks.length } },
+  );
+  await Project.updateOne(
+    { _id: customerPortal._id },
+    { $set: { lastTaskNumber: portalTasks.length } },
+  );
   const taskIdByKey = new Map(tasks.map((task) => [task.key, task._id as Types.ObjectId]));
   const taskId = (key: string): Types.ObjectId => {
     const id = taskIdByKey.get(key);
