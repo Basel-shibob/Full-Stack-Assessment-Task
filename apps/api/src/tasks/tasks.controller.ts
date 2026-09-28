@@ -10,7 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import type { Paginated, TaskDetail, TaskSummary } from '@projectflow/shared';
+import type { Paginated, TaskDetail, TaskSummary, TaskActivityEntry } from '@projectflow/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { toObjectId } from '../common/utils/object-id';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -19,6 +19,7 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { TasksService } from './tasks.service';
 import { UpdateTaskAssigneeDto } from './dto/update-task-assignee.dto';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @Controller()
 export class TasksController {
@@ -53,6 +54,19 @@ export class TasksController {
   @Get('tasks/:taskId')
   findOne(@Param('taskId') taskId: string, @CurrentUser('id') userId: string): Promise<TaskDetail> {
     return this.tasksService.findOne(toObjectId(taskId, 'task id'), toObjectId(userId, 'user id'));
+  }
+
+  @Get('tasks/:taskId/activity')
+  findActivity(
+    @Param('taskId') taskId: string,
+    @CurrentUser('id') userId: string,
+    @Query() query: PaginationQueryDto,
+  ): Promise<Paginated<TaskActivityEntry>> {
+    return this.tasksService.findActivity(
+      toObjectId(taskId, 'task id'),
+      toObjectId(userId, 'user id'),
+      query,
+    );
   }
 
   @Patch('tasks/:taskId')

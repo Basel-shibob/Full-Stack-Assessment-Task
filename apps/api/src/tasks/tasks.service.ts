@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { type FilterQuery, Model, Types } from 'mongoose';
-import type { Paginated, TaskDetail, TaskSummary } from '@projectflow/shared';
+import type { Paginated, TaskDetail, TaskSummary, TaskActivityEntry } from '@projectflow/shared';
 import { toUserSummary } from '../common/utils/serialize';
 import { Comment, type CommentDocument } from '../comments/schemas/comment.schema';
 import { canManage, ProjectAccessService } from '../projects/project-access.service';
@@ -14,6 +14,8 @@ import type { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { Task, type TaskDocument } from './schemas/task.schema';
 import type { UpdateTaskAssigneeDto } from './dto/update-task-assignee.dto';
 import { ProjectMembersService } from '../project-members/project-members.service';
+import { TaskActivitiesService } from '../activities/task-activities.service';
+import type { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class TasksService {
@@ -24,6 +26,7 @@ export class TasksService {
     private readonly projectAccessService: ProjectAccessService,
     private readonly usersService: UsersService,
     private readonly projectMembersService: ProjectMembersService,
+    private readonly taskActivitiesService: TaskActivitiesService,
   ) {}
 
   async findByProject(
@@ -138,33 +141,60 @@ export class TasksService {
     return this.toDetail(task, project);
   }
 
-async updateAssignee(
-  taskId: Types.ObjectId,
-  userId: Types.ObjectId,
-  dto: UpdateTaskAssigneeDto,
-): Promise<TaskDetail> {
-  const task = await this.findTaskOrFail(taskId);
-  const access = await this.projectAccessService.assertCanView(task.projectId, userId);
+  async updateAssignee(
+    taskId: Types.ObjectId,
+    userId: Types.ObjectId,
+    dto: UpdateTaskAssigneeDto,
+  ): Promise<TaskDetail> {
+    const task = await this.findTaskOrFail(taskId);
+    const access = await this.projectAccessService.assertCanView(task.projectId, userId);
 
-  const nextAssigneeId = dto.assigneeId ? new Types.ObjectId(dto.assigneeId) : null;
-  const isSelf = nextAssigneeId?.equals(userId) ?? false;
+    const nextAssigneeId = dto.assigneeId ? new Types.ObjectId(dto.assigneeId) : null;
+    const isSelf = nextAssigneeId?.equals(userId) ?? false;
 
-  if (!canManage(access) && !isSelf) {
-    throw new ForbiddenException('You do not have permission to change the assignee');
-  }
-
-  if (nextAssigneeId) {
-    const role = await this.projectMembersService.findRole(task.projectId, nextAssigneeId);
-    if (role === null) {
-      throw new ForbiddenException('The assignee must be a member of this project');
+    if (!canManage(access) && !isSelf) {
+      throw new ForbiddenException('You do not have permission to change the assignee');
     }
+
+    if (nextAssigneeId) {
+      const role = await this.projectMembersService.findRole(task.projectId, nextAssigneeId);
+      if (role === null) {
+        throw new ForbiddenException('The assignee must be a member of this project');
+      }
+    }
+
+    const previousAssigneeId = task.assigneeId ?? null;
+    const unchanged = previousAssigneeId
+      ? (nextAssigneeId?.equals(previousAssigneeId) ?? false)
+      : nextAssigneeId === null;
+
+    if (unchanged) {
+      return this.toDetail(task, access.project);
+    }
+
+    task.assigneeId = nextAssigneeId;
+    await task.save();
+
+    await this.taskActivitiesService.recordAssigneeChange(
+      task._id,
+      userId,
+      previousAssigneeId,
+      nextAssigneeId,
+    );
+
+    return this.toDetail(task, access.project);
   }
 
-  task.assigneeId = nextAssigneeId;
-  await task.save();
+  async findActivity(
+    taskId: Types.ObjectId,
+    userId: Types.ObjectId,
+    query: PaginationQueryDto,
+  ): Promise<Paginated<TaskActivityEntry>> {
+    const task = await this.findTaskOrFail(taskId);
+    await this.projectAccessService.assertCanView(task.projectId, userId);
 
-  return this.toDetail(task, access.project);
-}
+    return this.taskActivitiesService.findByTask(task._id, query);
+  }
 
   async remove(taskId: Types.ObjectId, userId: Types.ObjectId): Promise<void> {
     const task = await this.findTaskOrFail(taskId);

@@ -1,5 +1,6 @@
 import type { OrganizationRole, ProjectRole } from './roles';
 import type { TaskPriority, TaskStatus } from './tasks';
+import type { TaskActivityType } from './activities';
 
 /** A user as returned by the API. Never carries credential material. */
 export interface UserSummary {
@@ -90,4 +91,14 @@ export interface ApiErrorBody {
   statusCode: number;
   message: string;
   error: string;
+}
+
+export interface TaskActivityEntry {
+  id: string;
+  taskId: string;
+  type: TaskActivityType;
+  actor: UserSummary;
+  from: UserSummary | null;
+  to: UserSummary | null;
+  createdAt: string;
 }
