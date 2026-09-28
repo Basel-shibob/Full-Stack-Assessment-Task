@@ -4,6 +4,7 @@ import type {
   TaskPriority,
   TaskStatus,
   TaskSummary,
+  TaskActivityEntry,
 } from '@projectflow/shared';
 import { apiRequest } from '@/lib/api-client';
 
@@ -48,5 +49,18 @@ export function updateTask(
   return apiRequest<TaskDetail>(`/tasks/${taskId}`, {
     method: 'PATCH',
     body: payload,
+  });
+}
+
+export function updateTaskAssignee(taskId: string, assigneeId: string | null): Promise<TaskDetail> {
+  return apiRequest<TaskDetail>(`/tasks/${taskId}/assignee`, {
+    method: 'PATCH',
+    body: { assigneeId },
+  });
+}
+
+export function fetchTaskActivity(taskId: string): Promise<Paginated<TaskActivityEntry>> {
+  return apiRequest<Paginated<TaskActivityEntry>>(`/tasks/${taskId}/activity`, {
+    query: { page: 1, pageSize: 50 },
   });
 }

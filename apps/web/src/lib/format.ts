@@ -31,3 +31,27 @@ export function initialsOf(name: string): string {
   }
   return `${parts[0]![0]}${parts[parts.length - 1]![0]}`.toUpperCase();
 }
+
+const RELATIVE_FORMATTER = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+
+const RELATIVE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+  ['year', 365 * 24 * 60 * 60],
+  ['month', 30 * 24 * 60 * 60],
+  ['day', 24 * 60 * 60],
+  ['hour', 60 * 60],
+  ['minute', 60],
+];
+
+/** "2 minutes ago", "1 hour ago" — used by the activity timeline. */
+export function formatRelativeTime(value: string | Date): string {
+  const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000);
+  const magnitude = Math.abs(seconds);
+
+  for (const [unit, unitSeconds] of RELATIVE_UNITS) {
+    if (magnitude >= unitSeconds) {
+      return RELATIVE_FORMATTER.format(Math.round(seconds / unitSeconds), unit);
+    }
+  }
+
+  return 'just now';
+}
