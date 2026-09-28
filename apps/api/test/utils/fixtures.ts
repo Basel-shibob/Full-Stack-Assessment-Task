@@ -119,5 +119,8 @@ export async function createTask(
     createdAt: new Date(),
     updatedAt: new Date(),
   });
+  await connection
+    .collection('projects')
+    .updateOne({ _id: toObjectId(connection, projectId) }, { $max: { lastTaskNumber: number } });
   return result.insertedId.toString();
 }
