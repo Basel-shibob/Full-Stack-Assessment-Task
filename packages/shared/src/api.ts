@@ -51,6 +51,7 @@ export interface TaskSummary {
   commentCount: number;
   createdBy: UserSummary;
   createdAt: string;
+  assignee: UserSummary | null;
   updatedAt: string;
 }
 

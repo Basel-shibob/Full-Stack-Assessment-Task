@@ -12,6 +12,8 @@ import type { ListTasksQueryDto } from './dto/list-tasks.dto';
 import type { UpdateTaskDto } from './dto/update-task.dto';
 import type { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { Task, type TaskDocument } from './schemas/task.schema';
+import type { UpdateTaskAssigneeDto } from './dto/update-task-assignee.dto';
+import { ProjectMembersService } from '../project-members/project-members.service';
 
 @Injectable()
 export class TasksService {
@@ -21,6 +23,7 @@ export class TasksService {
     @InjectModel(Comment.name) private readonly commentModel: Model<CommentDocument>,
     private readonly projectAccessService: ProjectAccessService,
     private readonly usersService: UsersService,
+    private readonly projectMembersService: ProjectMembersService,
   ) {}
 
   async findByProject(
@@ -121,15 +124,47 @@ export class TasksService {
     return this.toDetail(task, access.project);
   }
 
-  async updateStatus(taskId: Types.ObjectId, userId: Types.ObjectId, dto: UpdateTaskStatusDto): Promise<TaskDetail> {
+  async updateStatus(
+    taskId: Types.ObjectId,
+    userId: Types.ObjectId,
+    dto: UpdateTaskStatusDto,
+  ): Promise<TaskDetail> {
     const task = await this.findTaskOrFail(taskId);
     const { project } = await this.projectAccessService.assertCanView(task.projectId, userId);
-    
+
     task.status = dto.status;
     await task.save();
 
     return this.toDetail(task, project);
   }
+
+async updateAssignee(
+  taskId: Types.ObjectId,
+  userId: Types.ObjectId,
+  dto: UpdateTaskAssigneeDto,
+): Promise<TaskDetail> {
+  const task = await this.findTaskOrFail(taskId);
+  const access = await this.projectAccessService.assertCanView(task.projectId, userId);
+
+  const nextAssigneeId = dto.assigneeId ? new Types.ObjectId(dto.assigneeId) : null;
+  const isSelf = nextAssigneeId?.equals(userId) ?? false;
+
+  if (!canManage(access) && !isSelf) {
+    throw new ForbiddenException('You do not have permission to change the assignee');
+  }
+
+  if (nextAssigneeId) {
+    const role = await this.projectMembersService.findRole(task.projectId, nextAssigneeId);
+    if (role === null) {
+      throw new ForbiddenException('The assignee must be a member of this project');
+    }
+  }
+
+  task.assigneeId = nextAssigneeId;
+  await task.save();
+
+  return this.toDetail(task, access.project);
+}
 
   async remove(taskId: Types.ObjectId, userId: Types.ObjectId): Promise<void> {
     const task = await this.findTaskOrFail(taskId);
@@ -152,7 +187,7 @@ export class TasksService {
     }
 
     const [creators, commentRows] = await Promise.all([
-      this.usersService.findManyByIds(tasks.map((task) => task.createdBy)),
+      this.usersService.findManyByIds(collectUserIds(tasks)),
       this.commentModel
         .aggregate<{
           _id: Types.ObjectId;
@@ -177,6 +212,9 @@ export class TasksService {
       priority: task.priority,
       commentCount: commentCounts.get(task._id.toString()) ?? 0,
       createdBy: toCreatorSummary(creatorsById.get(task.createdBy.toString())),
+      assignee: task.assigneeId
+        ? toAssigneeSummary(creatorsById.get(task.assigneeId.toString()))
+        : null,
       createdAt: task.createdAt.toISOString(),
       updatedAt: task.updatedAt.toISOString(),
     }));
@@ -211,4 +249,19 @@ const DELETED_USER = {
 
 function toCreatorSummary(user: Parameters<typeof toUserSummary>[0] | undefined) {
   return user ? toUserSummary(user) : DELETED_USER;
+}
+
+function toAssigneeSummary(user: Parameters<typeof toUserSummary>[0] | undefined) {
+  return user ? toUserSummary(user) : null;
+}
+
+function collectUserIds(tasks: TaskDocument[]): Types.ObjectId[] {
+  const ids = new Map<string, Types.ObjectId>();
+  for (const task of tasks) {
+    ids.set(task.createdBy.toString(), task.createdBy);
+    if (task.assigneeId) {
+      ids.set(task.assigneeId.toString(), task.assigneeId);
+    }
+  }
+  return [...ids.values()];
 }

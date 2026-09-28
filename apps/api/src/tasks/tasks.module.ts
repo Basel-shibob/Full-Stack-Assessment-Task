@@ -6,6 +6,7 @@ import { UsersModule } from '../users/users.module';
 import { Task, TaskSchema } from './schemas/task.schema';
 import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
+import { ProjectMembersModule } from '../project-members/project-members.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { TasksService } from './tasks.service';
     ]),
     ProjectsModule,
     UsersModule,
+    ProjectMembersModule,
   ],
   controllers: [TasksController],
   providers: [TasksService],
