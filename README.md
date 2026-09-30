@@ -168,6 +168,7 @@ projectflow/
 │   │   │   ├── tasks/
 │   │   │   ├── comments/
 │   │   │   ├── common/          guards, decorators, filters, shared DTOs
+│   │   │   ├── activities/      task activity history
 │   │   │   └── database/seed.ts
 │   │   └── test/                e2e suites and fixtures
 │   │
@@ -199,6 +200,7 @@ Organization        ── OrganizationMember ── User      (OWNER | ADMIN | 
 Organization  ── Project
 Project             ── ProjectMember      ── User      (PROJECT_MANAGER | MEMBER)
 Project       ── Task ── Comment
+                   └──── TaskActivity
 ```
 
 Membership is stored in its own collection rather than as arrays on the parent
@@ -238,8 +240,10 @@ GET    /projects/:projectId/tasks
 POST   /projects/:projectId/tasks
 GET    /tasks/:taskId
 PATCH  /tasks/:taskId
+PATCH  /tasks/:taskId/assignee
 PATCH  /tasks/:taskId/status
 DELETE /tasks/:taskId
+GET    /tasks/:taskId/activity
 
 GET    /tasks/:taskId/comments
 POST   /tasks/:taskId/comments
@@ -265,3 +269,88 @@ parsing.
 
 Components are server components by default; `"use client"` is added only where
 interactivity or hooks require it.
+
+---
+
+## Technical decisions
+
+Decisions made while adding task assignment and activity history. The reasoning
+in full is in `ASSESSMENT_NOTES.md`.
+
+### Assignment lives on the task, not in a join collection
+
+`assigneeId` is a nullable `ObjectId` on `Task`, deliberately separate from
+`createdBy`. A task has at most one assignee, so a join collection would add a
+lookup and a schema to model a relationship the document already expresses.
+
+### Assignment has its own endpoint
+
+`PATCH /tasks/:taskId/assignee` rather than another optional key on
+`PATCH /tasks/:taskId`, because the permission rules differ: the generic update
+allows the creator or a manager, while assignment allows a manager or the user
+themselves. The repository already separates `PATCH /tasks/:taskId/status` for
+the same reason.
+
+### Assignment rules are enforced in the service
+
+| Request               | Who may do it                               |
+| --------------------- | ------------------------------------------- |
+| Assign yourself       | Any project member                          |
+| Assign another member | `OWNER`, `ADMIN`, `PROJECT_MANAGER`         |
+| Unassign              | An authorized role, or the current assignee |
+| Assign a non-member   | Nobody — `403`                              |
+
+Project membership of the _assignee_ is checked separately from the access of
+the _caller_. A manager has access to every project in their organization;
+that says nothing about whether the person being assigned belongs to it.
+
+### Activity is a separate collection with typed endpoints
+
+`task_activities`, indexed on `{ taskId: 1, createdAt: -1 }` to match the read
+pattern (filter by task, newest first).
+
+Transitions are stored as explicit nullable `fromUserId` / `toUserId` fields
+rather than an untyped `metadata` object, so all three cases the feature
+requires are the same shape and TypeScript can check them:
+
+| Transition                | `from` | `to`   |
+| ------------------------- | ------ | ------ |
+| Unassigned → assigned     | `null` | user   |
+| Assigned → different user | user   | user   |
+| Assigned → unassigned     | user   | `null` |
+
+A row is written only when the assignee actually changes.
+
+Reads resolve every actor, previous and next user for a whole page in one `$in`
+query, so a page of activity costs two queries regardless of row count.
+
+### Task numbering is concurrency-safe
+
+`Project.lastTaskNumber` is a monotonic counter reserved with a single atomic
+`findOneAndUpdate` + `$inc`. It replaces a `countDocuments` + 1 that could hand
+the same number to two concurrent requests.
+
+`{ projectId, number }` carries a **unique index**, so the database rejects a
+duplicate even if application code is later rewritten incorrectly.
+
+This relies on single-document atomicity in MongoDB, not on transactions — it
+runs on a standalone `mongod` with no replica set. Full reasoning in
+`BUG_REPORT.md`.
+
+Any code path that creates tasks outside `TasksService` must advance the
+counter. Both `database/seed.ts` and the e2e fixtures do.
+
+### The frontend uses optimistic updates with rollback
+
+Assignment updates the cache in `onMutate`, restores the snapshot in `onError`,
+and writes the server's response in `onSuccess`. The interaction feels instant
+and a rejected permission still leaves the UI truthful.
+
+### Authorization fix
+
+`PATCH /tasks/:taskId/status` previously performed no access check at all. It
+now resolves project access like every other mutation. `assertCanView` rather
+than `assertCanManage`, because moving a task across the board is routine work
+for any project member. See `BUG_REPORT.md`.
+
+---
